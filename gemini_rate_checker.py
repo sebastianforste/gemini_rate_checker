@@ -1,9 +1,12 @@
-import requests
+import argparse
 import json
-import time
 import os
+import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+import requests
 from dotenv import load_dotenv
 
 # Load directory of the script to find .env
@@ -14,6 +17,39 @@ load_dotenv(SCRIPT_DIR / ".env")
 API_KEY = os.getenv('GEMINI_API_KEY')
 HISTORY_FILE = SCRIPT_DIR / "gemini_rate_history.json"
 REPORT_FILE = SCRIPT_DIR / "gemini_rate_check_results.html"
+
+def classify_model_response(status_code: int) -> tuple[bool, str]:
+    """Convert an HTTP status code into a normalized check outcome."""
+    if status_code == 200:
+        return True, "OK"
+    if status_code == 429:
+        return False, "Rate Limit (429)"
+    return False, f"Error {status_code}"
+
+def extract_testable_models(api_payload: dict[str, Any]) -> list[str]:
+    """Return Gemini model names that support generateContent and are not Gemma."""
+    models = api_payload.get("models", [])
+    selected: list[str] = []
+    for model in models:
+        model_name = model.get("name", "")
+        methods = model.get("supportedGenerationMethods", [])
+        if "generateContent" not in methods:
+            continue
+        if "gemma" in model_name.lower():
+            continue
+        selected.append(model_name)
+    return selected
+
+def serialize_results(results: list[tuple[bool, str, str]]) -> list[dict[str, Any]]:
+    """Convert tuple results into JSON-friendly dictionaries."""
+    return [
+        {
+            "success": success,
+            "model": model_name,
+            "status": status,
+        }
+        for success, model_name, status in results
+    ]
 
 def save_history(results):
     """Save the run results to a persistent JSON history file."""
@@ -291,7 +327,7 @@ def generate_html_report(latest_results):
         f.write(html_content)
     print(f"Interactive history dashboard generated: {REPORT_FILE}")
 
-def run_check():
+def run_check(json_out: Path | None = None, write_html: bool = True):
     if not API_KEY:
         print("❌ Error: GEMINI_API_KEY not found in .env file.")
         return
@@ -308,57 +344,78 @@ def run_check():
             return
         
         data = response.json()
-        models = data.get('models', [])
-        print(f"📦 Found {len(models)} models. Testing...\n")
-        
-        for model in models:
-            model_name = model['name']
-            
-            # Filter out Gemma models as requested
-            if "gemma" in model_name.lower():
-                continue
-                
-            methods = model.get('supportedGenerationMethods', [])
-            
-            if "generateContent" in methods:
-                print(f"🔍 Testing: {model_name}...", end=" ", flush=True)
-                
-                generate_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
-                payload = {
-                    "contents": [{"parts": [{"text": "Hello"}]}]
-                }
-                
-                try:
-                    res = requests.post(
-                        generate_url, 
-                        headers={"Content-Type": "application/json"},
-                        data=json.dumps(payload),
-                        timeout=10
-                    )
-                    
-                    if res.status_code == 200:
-                        results.append((True, model_name, "OK"))
-                        print("✅ OK")
-                    elif res.status_code == 429:
-                        results.append((False, model_name, "Rate Limit (429)"))
-                        print("⏳ 429")
-                    else:
-                        msg = f"Error {res.status_code}"
-                        results.append((False, model_name, msg))
-                        print(f"❌ {msg}")
-                        
-                except Exception as e:
-                    results.append((False, model_name, f"Exception: {str(e)}"))
-                    print(f"❌ Exception")
-                
-                time.sleep(0.5)
+        model_names = extract_testable_models(data)
+        print(f"📦 Found {len(data.get('models', []))} models. Testing {len(model_names)} endpoints...\n")
+
+        for model_name in model_names:
+            print(f"🔍 Testing: {model_name}...", end=" ", flush=True)
+
+            generate_url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={API_KEY}"
+            payload = {
+                "contents": [{"parts": [{"text": "Hello"}]}]
+            }
+
+            try:
+                res = requests.post(
+                    generate_url,
+                    headers={"Content-Type": "application/json"},
+                    data=json.dumps(payload),
+                    timeout=10
+                )
+                success, msg = classify_model_response(res.status_code)
+                results.append((success, model_name, msg))
+
+                if success:
+                    print("✅ OK")
+                elif res.status_code == 429:
+                    print("⏳ 429")
+                else:
+                    print(f"❌ {msg}")
+
+            except Exception as e:
+                results.append((False, model_name, f"Exception: {str(e)}"))
+                print("❌ Exception")
+
+            time.sleep(0.5)
 
         print("\n📊 Run complete.")
         save_history(results)
-        generate_html_report(results)
+        if write_html:
+            generate_html_report(results)
+
+        if json_out:
+            json_out.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "timestamp": datetime.now().isoformat(),
+                "total": len(results),
+                "success": sum(1 for success, _, _ in results if success),
+                "results": serialize_results(results),
+            }
+            with open(json_out, "w") as f:
+                json.dump(payload, f, indent=2)
+            print(f"JSON report generated: {json_out}")
         
     except Exception as e:
         print(f"❌ Unexpected Error: {e}")
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Check Gemini model availability and rate-limit status.")
+    parser.add_argument(
+        "--json-out",
+        type=Path,
+        default=None,
+        help="Optional file path for structured JSON output.",
+    )
+    parser.add_argument(
+        "--no-html",
+        action="store_true",
+        help="Skip generating the HTML dashboard output.",
+    )
+    return parser.parse_args()
+
+def main() -> None:
+    args = parse_args()
+    run_check(json_out=args.json_out, write_html=not args.no_html)
+
 if __name__ == "__main__":
-    run_check()
+    main()

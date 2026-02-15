@@ -1,1 +1,36 @@
+# OS / editor
 .DS_Store
+.idea/
+.vscode/
+
+# Env
+.env
+.env.local
+
+# Python envs / caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Build / test outputs
+build/
+dist/
+.coverage
+coverage.xml
+htmlcov/
+
+# Generated reports
+gemini_rate_history.json
+gemini_rate_check_results.html
+
+# Logs
+*.log
+
+# Local tooling
+.agent/
+.antigravity/
+.npm-local/
