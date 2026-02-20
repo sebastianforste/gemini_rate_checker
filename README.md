@@ -44,3 +44,10 @@ pytest -q
 - `429` responses indicate quota/rate limits, not necessarily endpoint outage.
 - If all calls fail immediately, verify `GEMINI_API_KEY` and account permissions.
 - If output parsing in downstream tooling fails, use `--json-out` and consume the generated JSON payload directly.
+
+## Run and Checks
+<!-- CODEx_RUN_CHECKS -->
+```bash
+make install
+make check
+```

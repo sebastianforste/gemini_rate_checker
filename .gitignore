@@ -34,3 +34,15 @@ gemini_rate_check_results.html
 .agent/
 .antigravity/
 .npm-local/
+
+# CODEx_HYGIENE_BLOCK
+.telemetry/
+runtime_agent/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.playwright-mcp/
+.eslintcache
+*.tsbuildinfo
+*.log
