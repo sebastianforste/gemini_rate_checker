@@ -24,3 +24,9 @@ jobs:
         run: black --check .
       - name: Pytest
         run: pytest -q
+
+      - name: Ensure repository is clean
+        run: |
+          git status --porcelain
+          test -z "$(git status --porcelain)"
+          git diff --exit-code
